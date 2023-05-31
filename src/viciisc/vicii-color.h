@@ -33,6 +33,12 @@
 
 struct video_canvas_s;
 
+extern int kawari_is_composite(void);
+extern void kawari_set_rgb(int colorIndex, int channel, int value);
+extern void kawari_set_luma(int index, int value);
+extern void kawari_set_angle(int index, int value);
+extern void kawari_set_amplitude(int index, int value);
+
 extern int vicii_color_update_palette(struct video_canvas_s *canvas);
 
 #endif

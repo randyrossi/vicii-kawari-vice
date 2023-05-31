@@ -27,11 +27,13 @@
 #include "vice.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "types.h"
 #include "snapshot.h"
 #include "vicii-chip-model.h"
 #include "vicii-draw-cycle.h"
+#include "vicii-mem.h"
 #include "viciitypes.h"
 
 /* disable for debugging */
@@ -60,6 +62,18 @@
 #define COL_D02D     0x2d
 #define COL_D02E     0x2e
 
+static uint8_t hires_pixel_data_latched = 0;
+static uint16_t hires2_pixel_data_latched = 0;
+static uint8_t hires_color_data_latched = 0;
+static uint8_t hires_ff = 0;
+static uint8_t hires_pixel_value = 0;
+
+static uint8_t hires_pixel_data_pipe0[2] = {0,0};
+static uint8_t hires_pixel_data_pipe1[2] = {0,0};
+static uint8_t hires_color_data_pipe0[2] = {0,0};
+static uint8_t hires_color_data_pipe1[2] = {0,0};
+static uint8_t hires_cursor_pipe0[2] = {0,0};
+static uint8_t hires_cursor_pipe1[2] = {0,0};
 /* foreground/background graphics */
 
 static uint8_t gbuf_pipe0_reg = 0;
@@ -106,9 +120,11 @@ static int border_state = 0;
 
 /* pixel buffer */
 static uint8_t render_buffer[8];
+static uint8_t kawari_render_buffer[16];
 static uint8_t pri_buffer[8];
 
 static uint8_t pixel_buffer[8];
+static uint8_t kawari_pixel_buffer[16];
 
 /* color resolution registers */
 static uint8_t cregs[0x2f];
@@ -224,6 +240,120 @@ static DRAW_INLINE void draw_graphics(int i)
     pri_buffer[i] = pixel_pri;
 }
 
+static DRAW_INLINE void draw_kawari_graphics(int i, unsigned int cycle_flags)
+{
+    //int vis_en;
+    //vis_en = cycle_is_visible(cycle_flags);
+
+    if (i % 8 == xscroll_pipe) {
+       hires_ff = 0;
+       //if (vis_en && vicii.vborder == 0) {
+         switch (vicii.hires_mode) {
+           case 0b000:
+           case 0b001:
+              hires_color_data_latched = hires_color_data_pipe1[i/8];
+              hires_pixel_data_latched = hires_pixel_data_pipe1[i/8];
+              break;
+           case 0b100:
+              hires2_pixel_data_latched = hires_pixel_data_pipe1[i/8] << 8;
+              break;
+           default:
+              hires2_pixel_data_latched = (hires_color_data_pipe1[i/8] << 8) | hires_pixel_data_pipe1[i/8];
+              break;
+         }
+       //} else {
+       //  switch (vicii.hires_mode) {
+       //    case 0b000:
+       //    case 0b001:
+       //       hires_color_data_latched = 0;
+       //       hires_pixel_data_latched = 0;
+       //       break;
+       //    default:
+       //       hires2_pixel_data_latched = 55;
+       //       break;
+       //  }
+       //}
+    }
+
+    switch (vicii.hires_mode) {
+        case 0b000:
+        case 0b001:
+           hires_pixel_value = (hires_pixel_data_latched & 0x80) ? 1 : 0;
+           hires_pixel_data_latched <<= 1;
+           break;
+        case 0b010:
+           // 320x200x16
+           if (hires_ff & 1) {
+              hires_pixel_value = hires2_pixel_data_latched >> 12;
+              hires2_pixel_data_latched <<= 4;
+           }
+           break;
+        case 0b011:
+           // 640x200x4
+           hires_pixel_value = hires2_pixel_data_latched >> 12;
+           hires2_pixel_data_latched <<= 2;
+           break;
+        case 0b100:
+           // 160x200x16
+           if (hires_ff == 0) {
+              hires_pixel_value = hires2_pixel_data_latched >> 12;
+              hires2_pixel_data_latched <<= 4;
+           }
+           break;
+        default:
+           break;
+    }
+
+    hires_ff = hires_ff + 1;
+    hires_ff = hires_ff & 0b11;
+
+    uint8_t hires_color;
+    uint8_t hires_blink;
+    uint8_t not_hires_blink;
+    uint8_t hires_under;
+    uint8_t hires_reverse;
+    uint8_t blink_flash;
+    uint8_t cond1;
+    uint8_t cond2;
+    uint8_t cond3;
+
+    hires_color = hires_color_data_latched & 0xf;
+
+    switch (vicii.hires_mode) {
+        case 0b000:
+           // 000 : Kawari hires text mode
+           // Lower 4 bits = color index
+           // Bit 6 = reverse video
+           // Bit 5 = underline
+           // Bit 4 = blink
+           hires_blink = hires_color_data_latched & 16 ? 1 : 0;
+           not_hires_blink = ~hires_blink & 0b1;
+           hires_under = hires_color_data_latched & 32 ? 1 : 0;
+           hires_reverse = hires_color_data_latched & 64 ? 1 : 0;
+           blink_flash = vicii.hires_blink_ctr & 32 ? 1 : 0;
+           cond1 = (hires_blink & blink_flash) | not_hires_blink;
+           cond2 = hires_under && vicii.hires_rc == 7;
+           cond3 = hires_pixel_value ^ (hires_reverse | hires_cursor_pipe1[i/8]);
+           kawari_render_buffer[i] = cond1 ? (cond2 ? hires_color : (cond3 ? hires_color : COL_D021)) : COL_D021;
+           break;
+        case 0b001:
+           kawari_render_buffer[i] = hires_pixel_value ? hires_color : COL_D021;
+           // TODO is background pixel
+           break;
+        case 0b010:
+        case 0b100:
+           kawari_render_buffer[i] = hires_pixel_value & 0b1111;
+           // TODO is background pixel
+           break;
+        case 0b011:
+           kawari_render_buffer[i] = (vicii.hires_color_base & 0b11) | (hires_pixel_value >> 2);
+           // TODO is background pixel
+           break;
+       default:
+           break;
+    }
+}
+
 static DRAW_INLINE void draw_graphics8(unsigned int cycle_flags)
 {
     int vis_en;
@@ -233,12 +363,20 @@ static DRAW_INLINE void draw_graphics8(unsigned int cycle_flags)
     /* render pixels */
     /* pixel 0 */
     draw_graphics(0);
+    draw_kawari_graphics(0, cycle_flags);
+    draw_kawari_graphics(1, cycle_flags);
     /* pixel 1 */
     draw_graphics(1);
+    draw_kawari_graphics(2, cycle_flags);
+    draw_kawari_graphics(3, cycle_flags);
     /* pixel 2 */
     draw_graphics(2);
+    draw_kawari_graphics(4, cycle_flags);
+    draw_kawari_graphics(5, cycle_flags);
     /* pixel 3 */
     draw_graphics(3);
+    draw_kawari_graphics(6, cycle_flags);
+    draw_kawari_graphics(7, cycle_flags);
     /* pixel 4 */
     vmode16_pipe = ( vicii.regs[0x16] & 0x10 ) >> 2;
     if (vicii.color_latency) {
@@ -246,20 +384,28 @@ static DRAW_INLINE void draw_graphics8(unsigned int cycle_flags)
         vmode11_pipe |= ( vicii.regs[0x11] & 0x60 ) >> 2;
     }
     draw_graphics(4);
+    draw_kawari_graphics(8, cycle_flags);
+    draw_kawari_graphics(9, cycle_flags);
     /* pixel 5 */
     draw_graphics(5);
+    draw_kawari_graphics(10, cycle_flags);
+    draw_kawari_graphics(11, cycle_flags);
     /* pixel 6 */
     if (vicii.color_latency) {
         /* handle falling edge of internal signal */
         vmode11_pipe &= ( vicii.regs[0x11] & 0x60 ) >> 2;
     }
     draw_graphics(6);
+    draw_kawari_graphics(12, cycle_flags);
+    draw_kawari_graphics(13, cycle_flags);
     /* pixel 7 */
     if (vmode16_pipe && !vmode16_pipe2) {
         gbuf_mc_flop = 0;
     }
     vmode16_pipe2 = vmode16_pipe;
     draw_graphics(7);
+    draw_kawari_graphics(14, cycle_flags);
+    draw_kawari_graphics(15, cycle_flags);
 
     if (!vicii.color_latency) {
         vmode11_pipe = ( vicii.regs[0x11] & 0x60 ) >> 2;
@@ -270,13 +416,34 @@ static DRAW_INLINE void draw_graphics8(unsigned int cycle_flags)
     cbuf_pipe1_reg = cbuf_pipe0_reg;
     gbuf_pipe1_reg = gbuf_pipe0_reg;
 
+    // Not sure if we really need these pipes
+    hires_pixel_data_pipe1[0] = hires_pixel_data_pipe0[0];
+    hires_pixel_data_pipe1[1] = hires_pixel_data_pipe0[1];
+    hires_color_data_pipe1[0] = hires_color_data_pipe0[0];
+    hires_color_data_pipe1[1] = hires_color_data_pipe0[1];
+    hires_cursor_pipe1[0] = hires_cursor_pipe0[0];
+    hires_cursor_pipe1[1] = hires_cursor_pipe0[1];
+
+
     /* this makes sure gbuf is 0 outside the visible area
        It should probably be done somewhere around the fetch instead */
     if (vis_en && vicii.vborder == 0) {
         gbuf_pipe0_reg = vicii.gbuf;
         xscroll_pipe = vicii.regs[0x16] & 0x07;
+
+        hires_pixel_data_pipe0[0] = vicii.hires_pixel_data[0];
+        hires_pixel_data_pipe0[1] = vicii.hires_pixel_data[1];
+        hires_color_data_pipe0[0] = vicii.hires_color_data[0];
+        hires_color_data_pipe0[1] = vicii.hires_color_data[1];
+        hires_cursor_pipe0[0] = vicii.hires_cursor[0];
+        hires_cursor_pipe0[1] = vicii.hires_cursor[1];
     } else {
         gbuf_pipe0_reg = 0;
+
+        hires_pixel_data_pipe0[0] = 0;
+        hires_pixel_data_pipe0[1] = 0;
+        hires_color_data_pipe0[0] = 0;
+        hires_color_data_pipe0[1] = 0;
     }
 
     /* Only update vbuf and cbuf registers in the display state. */
@@ -550,6 +717,7 @@ static DRAW_INLINE void draw_border8(void)
     /* early exit for the continuous border case */
     if (border_state && vicii.main_border) {
         memset(render_buffer, COL_D020, 8);
+        memset(kawari_render_buffer, COL_D020, 16);
         return;
     }
 #endif
@@ -561,15 +729,18 @@ static DRAW_INLINE void draw_border8(void)
     if (csel) {
         if (border_state) {
             memset(render_buffer, COL_D020, 8);
+            memset(kawari_render_buffer, COL_D020, 16);
         }
         border_state = vicii.main_border;
     } else {
         if (border_state) {
             memset(render_buffer, COL_D020, 7);
+            memset(kawari_render_buffer, COL_D020, 15);
         }
         border_state = vicii.main_border;
         if (border_state) {
             render_buffer[7] = COL_D020;
+            kawari_render_buffer[15] = COL_D020;
         }
     }
 }
@@ -598,7 +769,9 @@ static DRAW_INLINE void draw_colors_6569(int offs, int i)
     pixel_buffer[lookup_index] = cregs[pixel_buffer[lookup_index]];
 
     /* draw pixel to buffer */
-    vicii.dbuf[offs + i] = pixel_buffer[i];
+    // Doubled up for kawari
+    vicii.dbuf[offs + i*2] = pixel_buffer[i];
+    vicii.dbuf[offs + i*2+1] = pixel_buffer[i];
 
     pixel_buffer[i] = render_buffer[i];
 }
@@ -618,9 +791,40 @@ static DRAW_INLINE void draw_colors_8565(int offs, int i)
     }
 
     /* draw pixel to buffer */
-    vicii.dbuf[offs + i] = pixel_buffer[i];
+    // Doubled up for kawari
+    vicii.dbuf[offs + i*2] = pixel_buffer[i];
+    vicii.dbuf[offs + i*2+1] = pixel_buffer[i];
 
     pixel_buffer[i] = render_buffer[i];
+}
+
+static DRAW_INLINE void draw_colors_6569_kawari(int offs, int i)
+{
+    int lookup_index;
+
+    /* resolve any unresolved colors */
+    lookup_index = (i + 1) & 0x0f;
+    kawari_pixel_buffer[lookup_index] = cregs[kawari_pixel_buffer[lookup_index]];
+
+    /* draw pixel to buffer */
+    vicii.dbuf[offs + i] = kawari_pixel_buffer[i];
+
+    kawari_pixel_buffer[i] = kawari_render_buffer[i];
+}
+
+static DRAW_INLINE void draw_colors_8565_kawari(int offs, int i)
+{
+    int lookup_index;
+
+    lookup_index = i;
+    /* resolve any unresolved colors */
+
+    kawari_pixel_buffer[lookup_index] = cregs[kawari_pixel_buffer[lookup_index]];
+
+    /* draw pixel to buffer */
+    vicii.dbuf[offs + i] = kawari_pixel_buffer[i];
+
+    kawari_pixel_buffer[i] = kawari_render_buffer[i];
 }
 
 static DRAW_INLINE void draw_colors8(void)
@@ -647,6 +851,25 @@ static DRAW_INLINE void draw_colors8(void)
         draw_colors_6569(offs, 5);
         draw_colors_6569(offs, 6);
         draw_colors_6569(offs, 7);
+
+        if (vicii.hires_enabled) {
+            draw_colors_6569_kawari(offs, 0);
+            draw_colors_6569_kawari(offs, 1);
+            draw_colors_6569_kawari(offs, 2);
+            draw_colors_6569_kawari(offs, 3);
+            draw_colors_6569_kawari(offs, 4);
+            draw_colors_6569_kawari(offs, 5);
+            draw_colors_6569_kawari(offs, 6);
+            draw_colors_6569_kawari(offs, 7);
+            draw_colors_6569_kawari(offs, 8);
+            draw_colors_6569_kawari(offs, 9);
+            draw_colors_6569_kawari(offs, 10);
+            draw_colors_6569_kawari(offs, 11);
+            draw_colors_6569_kawari(offs, 12);
+            draw_colors_6569_kawari(offs, 13);
+            draw_colors_6569_kawari(offs, 14);
+            draw_colors_6569_kawari(offs, 15);
+        }
     } else {
         draw_colors_8565(offs, 0);
         draw_colors_8565(offs, 1);
@@ -656,8 +879,29 @@ static DRAW_INLINE void draw_colors8(void)
         draw_colors_8565(offs, 5);
         draw_colors_8565(offs, 6);
         draw_colors_8565(offs, 7);
+
+        if (vicii.hires_enabled) {
+            draw_colors_8565_kawari(offs, 0);
+            draw_colors_8565_kawari(offs, 1);
+            draw_colors_8565_kawari(offs, 2);
+            draw_colors_8565_kawari(offs, 3);
+            draw_colors_8565_kawari(offs, 4);
+            draw_colors_8565_kawari(offs, 5);
+            draw_colors_8565_kawari(offs, 6);
+            draw_colors_8565_kawari(offs, 7);
+            draw_colors_8565_kawari(offs, 8);
+            draw_colors_8565_kawari(offs, 9);
+            draw_colors_8565_kawari(offs, 10);
+            draw_colors_8565_kawari(offs, 11);
+            draw_colors_8565_kawari(offs, 12);
+            draw_colors_8565_kawari(offs, 13);
+            draw_colors_8565_kawari(offs, 14);
+            draw_colors_8565_kawari(offs, 15);
+        }
     }
-    vicii.dbuf_offset += 8;
+
+    // Kawari can do up to 16 pixels per cycle
+    vicii.dbuf_offset += 16;
 
     update_cregs();
 }

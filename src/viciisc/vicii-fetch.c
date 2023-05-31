@@ -41,6 +41,8 @@
 #include "vicii-fetch.h"
 #include "viciitypes.h"
 
+#include "vicii-mem.h"
+
 #ifdef DEBUG
 #include "log.h"
 #endif
@@ -270,6 +272,63 @@ uint8_t vicii_fetch_graphics(void)
     vicii.vc &= 0x3ff;
 
     return data;
+}
+
+void vicii_fetch_kawari_graphics(int phase)
+{
+    static uint16_t addr;
+
+    uint16_t hires_cursor_addr = overlayMem[0x85] + (overlayMem[0x86] * 256);
+
+    switch (vicii.hires_mode) {
+      case 0b000: // text
+      case 0b001: // 16k bitmap with color cells
+        // color address
+        addr = ((vicii.hires_color_base << 11) | vicii.hires_vc);
+        break;
+      case 0b010:
+      case 0b011:
+        addr = vicii.hires_fvc;
+        break;
+      default:
+        break;
+    }
+
+    vicii.hires_color_data[phase] = extraMem[addr];
+
+    // char ptr address, only used by text mode 000
+    addr = ((vicii.hires_matrix_base << 11) | vicii.hires_vc);
+    vicii.hires_cursor[phase] = (hires_cursor_addr == addr) ? 1 : 0;
+
+    uint8_t char_case;
+    uint8_t altc_bit;
+    switch (vicii.hires_mode) {
+      case 0b000:
+        char_case = vicii.regs[0x18] & 2 ? 1 : 0;
+        altc_bit = vicii.hires_color_data[phase] & 0x80 ? 1 : 0;
+        addr = (vicii.hires_char_pixel_base << 12) | ((char_case | altc_bit) << 11) | (extraMem[addr] << 3) | vicii.hires_rc;
+        break;
+      case 0b001:
+      case 0b100:
+        addr = vicii.hires_fvc >> 1;
+        break;
+      case 0b010:
+      case 0b011:
+        addr = vicii.hires_fvc | 1;
+        break;
+      default:
+        break;
+    }
+
+    vicii.hires_pixel_data[phase] = extraMem[addr];
+
+    vicii.hires_vc++;
+    vicii.hires_vc &= 0x7ff;
+
+    if (vicii.hires_badline_hist != 0) {
+       vicii.hires_fvc = vicii.hires_fvc+2;
+       vicii.hires_fvc &= vicii.hires_fvc & 0xffff;
+    }
 }
 
 uint8_t vicii_fetch_sprite_pointer(int i)

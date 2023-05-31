@@ -362,6 +362,40 @@ static video_cbm_palette_t vicii_palette_6569r3 =
 
 #ifdef TOBIAS_COLORS
 
+static video_cbm_color_t kawari_colors[VICII_NUM_COLORS] =
+{
+    { 0.000 * 256.0,           0.00        , 0.000 * 256.0, -0, "Black"       },
+    { 1.000 * 256.0,           0.00        , 0.000 * 256.0,  0, "White"       },
+    { 0.306 * 256.0,          95.50        , 0.217 * 256.0,  1, "Red"         },
+    { 0.639 * 256.0,         275.50 - 180.0, 0.210 * 256.0, -1, "Cyan"        },
+    { 0.363 * 256.0,          54.00 - 180.0, 0.219 * 256.0, -1, "Purple"      },
+    { 0.500 * 256.0,         241.70        , 0.213 * 256.0,  1, "Green"       },
+    { 0.237 * 256.0,         355.60 - 360.0, 0.217 * 256.0,  1, "Blue"        },
+    { 0.763 * 256.0,         175.60 - 180.0, 0.211 * 256.0, -1, "Yellow"      },
+    { 0.363 * 256.0,         128.25 - 180.0, 0.217 * 256.0, -1, "Orange"      },
+    { 0.237 * 256.0,         146.50        , 0.214 * 256.0,  1, "Brown"       },
+    { 0.500 * 256.0,          95.50        , 0.217 * 256.0,  1, "Light Red"   },
+    { 0.306 * 256.0,           0.00        , 0.000 * 256.0, -0, "Dark Grey"   },
+    { 0.461 * 256.0,           0.00        , 0.000 * 256.0, -0, "Medium Grey" },
+    { 0.763 * 256.0,         241.70 - 360.0, 0.213 * 256.0,  1, "Light Green" },
+    { 0.461 * 256.0,         355.60 - 360.0, 0.217 * 256.0,  1, "Light Blue"  },
+    { 0.639 * 256.0,           0.00        , 0.000 * 256.0,  0, "Light Grey"  }
+};
+
+static video_cbm_palette_t kawari_palette =
+{
+    VICII_NUM_COLORS,
+    kawari_colors,
+#ifdef SEPERATE_ODD_EVEN_COLORS
+    kawari_colors,
+    kawari_colors,
+#else
+    NULL, NULL,
+#endif
+    0.0,
+    CBM_PALETTE_RGB
+};
+
 static video_cbm_color_t vicii_colors_6569r1[VICII_NUM_COLORS] =
 {
     { 0.000 * 256.0,           0.00        , 0.000 * 256.0, -0, "Black"       },
@@ -647,6 +681,48 @@ int vicii_color_update_palette(struct video_canvas_s *canvas)
             break;
     }
 #endif
+
+    // Ignore all that and always install kawari palette
+    // which can be changed using kawari registers
+    cp = &kawari_palette;
+
     video_color_palette_internal(canvas, cp);
     return 0;
+}
+
+void kawari_set_rgb(int index, int channel, int value)
+{
+   if (channel == 0)
+      kawari_colors[index].luminance = ((float)value / 63.0f) * 255.0f; // red
+   else if (channel == 1)
+      kawari_colors[index].angle = ((float)value / 63.0f) * 255.0f; // green
+   else if (channel == 2)
+      kawari_colors[index].saturation = ((float)value / 63.0f) * 255.0f; // blue
+}
+
+void kawari_set_luma(int index, int value) {
+    // Trial and error for composite
+    value = value - 7; if (value < 0) value = 0;
+    kawari_colors[index].luminance = value*value / 15.564f;
+}
+
+void kawari_set_angle(int index, int value) {
+    if (value != 0) {
+       kawari_colors[index].angle =
+        ((float)value / 255.0f) * 359.0;
+       kawari_colors[index].direction = 1;
+    } else {
+       kawari_colors[index].angle = 0;
+       kawari_colors[index].direction = 0;
+    }
+}
+
+void kawari_set_amplitude(int index, int value) {
+    // Saturation can't go too high or there are complaints.
+    kawari_colors[index].saturation =
+        ((float)value / 50.0f) * 255.0;
+}
+
+int kawari_is_composite(void) {
+    return kawari_palette.type == CBM_PALETTE_YUV;
 }

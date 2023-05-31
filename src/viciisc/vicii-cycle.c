@@ -44,6 +44,7 @@
 #include "vicii-fetch.h"
 #include "vicii-irq.h"
 #include "vicii-lightpen.h"
+#include "vicii-mem.h"
 #include "vicii-resources.h"
 #include "vicii.h"
 #include "viciitypes.h"
@@ -52,10 +53,20 @@ static inline void check_badline(void)
 {
     /* Check badline condition (line range and "allow bad lines" handled outside */
     if ((vicii.raster_line & 7) == vicii.ysmooth) {
-        vicii.bad_line = 1;
+        // This is effectively what kawari does. It allows idle to change.
+        if (!vicii.hires_enabled || vicii.hires_allow_badlines) {
+            vicii.bad_line = 1;
+        }
         vicii.idle_state = 0;
     } else {
         vicii.bad_line = 0;
+    }
+
+    if ((vicii.raster_line & 7) == vicii.ysmooth) {
+        vicii.hires_badline = 1;
+        vicii.hires_idle = 0;
+    } else {
+        vicii.hires_badline = 0;
     }
 }
 
@@ -132,6 +143,12 @@ static inline uint8_t cycle_phi1_fetch(unsigned int cycle_flags)
     uint8_t data;
     int s;
 
+    // Kawari always fetches > 15 and <= 55 on low PHI (NOTE: kawari *.v files indexed from 0, unlike vice nums)
+    if (vicii.raster_cycle > VICII_PAL_CYCLE(15) && vicii.raster_cycle <= VICII_PAL_CYCLE(55)) {
+       if (!vicii.hires_idle)
+          vicii_fetch_kawari_graphics(1);
+    }
+
     if (cycle_is_fetch_g(cycle_flags)) {
         if (!vicii.idle_state) {
             data = vicii_fetch_graphics();
@@ -160,6 +177,15 @@ static inline uint8_t cycle_phi1_fetch(unsigned int cycle_flags)
     data = vicii_fetch_idle();
 
     return data;
+}
+
+static inline void cycle_phi2_fetch(unsigned int cycle_flags)
+{
+    // Kawari always fetches >= 14 and < 54 on high PHI (NOTE: kawari *.v files indexed from 0, unlike vice nums)
+    if (vicii.raster_cycle >= VICII_PAL_CYCLE(15) && vicii.raster_cycle < VICII_PAL_CYCLE(55)) {
+       if (!vicii.hires_idle)
+          vicii_fetch_kawari_graphics(0);
+    }
 }
 
 static inline void check_vborder_top(int line)
@@ -209,12 +235,19 @@ static inline void vicii_cycle_start_of_frame(void)
     vicii.vc = 0;
     vicii.light_pen.triggered = 0;
 
+    vicii.hires_vcbase = 0;
+    vicii.hires_vc = 0;
+    vicii.hires_fvc = 0;
+
     /* Retrigger light pen if line is still held low */
     if (vicii.light_pen.state) {
         /* add offset depending on chip model (FIXME use proper variable) */
         vicii.light_pen.x_extra_bits = (vicii.color_latency ? 2 : 1);
         vicii_trigger_light_pen_internal(1);
     }
+
+    vicii.hires_blink_ctr++;
+    vicii.hires_blink_ctr = vicii.hires_blink_ctr & 0b111111;
 }
 
 static inline void vicii_cycle_end_of_line(void)
@@ -238,6 +271,7 @@ static inline void vicii_cycle_start_of_line(void)
     }
 
     vicii.bad_line = 0;
+    vicii.hires_badline = 0;
 }
 
 
@@ -401,6 +435,52 @@ int vicii_cycle(void)
     /* Phi1 fetch */
     vicii.last_read_phi1 = cycle_phi1_fetch(vicii.cycle_flags);
 
+    // 16 ticks each half cycle for blitter
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+
+    // 4 bytes per half cycle for copy
+    do_copy();
+    do_copy();
+    do_copy();
+    do_copy();
+
+    // 16 bytes per half cycle for fill
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+
+    // Do DMA on idle cycles
+    if (vicii.idle_state) {
+        do_dma_xfer();
+    }
+
     /* Check horizontal border flag */
     check_hborder(vicii.cycle_flags);
 
@@ -548,6 +628,15 @@ int vicii_cycle(void)
         }
     }
 
+    if (vicii.raster_cycle == VICII_PAL_CYCLE(14)) {
+        vicii.hires_vc = vicii.hires_vcbase;
+        if (vicii.hires_badline) {
+            vicii.hires_rc = 0;
+        }
+        vicii.hires_badline_hist <<= 1;
+        vicii.hires_badline_hist |= vicii.hires_badline;
+    }
+
     /* Update RC (Cycle 58 on PAL) */
     /* if (vicii.raster_cycle == VICII_PAL_CYCLE(58)) { */
     if (cycle_is_update_rc(vicii.cycle_flags)) {
@@ -560,6 +649,17 @@ int vicii_cycle(void)
         if (!vicii.idle_state || vicii.bad_line) {
             vicii.rc = (vicii.rc + 1) & 0x7;
             vicii.idle_state = 0;
+        }
+    }
+
+    if (vicii.raster_cycle == VICII_PAL_CYCLE(58)) {
+        if (vicii.hires_rc == 7) {
+            vicii.hires_idle = 1;
+            vicii.hires_vcbase = vicii.hires_vc;
+        }
+        if (!vicii.hires_idle || vicii.hires_badline) {
+            vicii.hires_rc = (vicii.hires_rc + 1) & 0x7;
+            vicii.hires_idle = 0;
         }
     }
 
@@ -599,6 +699,55 @@ int vicii_cycle(void)
         }
 #endif
         vicii_fetch_matrix();
+    }
+
+    cycle_phi2_fetch(vicii.cycle_flags); // KAWARI
+
+    // 16 ticks each half cycle for blitter
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+    do_blit();
+
+    // 4 bytes per half cycle for copy
+    do_copy();
+    do_copy();
+    do_copy();
+    do_copy();
+
+    // 16 bytes per half cycle for fill
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+    do_fill();
+
+    // Do DMA on idle cycles
+    if (vicii.idle_state) {
+        do_dma_xfer();
     }
 
     /* clear internal bus (may get set by a VIC-II read or write) */

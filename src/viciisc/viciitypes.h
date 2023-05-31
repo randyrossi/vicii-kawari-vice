@@ -33,7 +33,7 @@
 #include "types.h"
 
 /* Screen constants.  */
-#define VICII_SCREEN_XPIX                  320
+#define VICII_SCREEN_XPIX                  640 // Doubled for Kawari
 #define VICII_SCREEN_YPIX                  200
 #define VICII_SCREEN_TEXTCOLS              40
 #define VICII_SCREEN_TEXTLINES             25
@@ -57,7 +57,7 @@
 #define VICII_LAST_DMA_LINE       0xf7
 
 /* drawing constants. */
-#define VICII_DRAW_BUFFER_SIZE (65 * 8)
+#define VICII_DRAW_BUFFER_SIZE (65 * 8 * 2) // Doubled for Kawari
 
 /* just a dummy for the vicii-draw.c wrapper */
 #define VICII_DUMMY_MODE (0)
@@ -176,6 +176,27 @@ struct vicii_s {
 
     /* Internal memory counter (VC).  */
     int vc;
+
+    /* kawari */
+    uint16_t hires_vcbase;
+    uint16_t hires_vc;
+    uint16_t hires_fvc;
+    uint8_t hires_rc;
+    uint8_t hires_idle;
+    uint8_t hires_badline;
+    uint16_t hires_blink_ctr;
+    uint8_t hires_badline_hist;
+
+    uint8_t hires_cursor[2];
+    uint8_t hires_color_data[2];
+    uint8_t hires_pixel_data[2];
+    uint8_t hires_allow_badlines;
+    uint8_t hires_mode;
+    uint8_t hires_enabled;
+    uint8_t hires_char_pixel_base;
+    uint8_t hires_matrix_base;
+    uint8_t hires_color_base;
+
 
     /* Internal row counter (RC).  */
     int rc;

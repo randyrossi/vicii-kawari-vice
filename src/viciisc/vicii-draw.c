@@ -68,7 +68,8 @@ static uint8_t *const aligned_line_buffer = (uint8_t *)_aligned_line_buffer;
 /* Dummy mode for using cycle based drawing.  */
 #define FULL_WIDTH_CHARS ((vicii.screen_leftborderwidth / 8) + VICII_SCREEN_TEXTCOLS + (vicii.screen_rightborderwidth / 8))
 
-#define DBUF_OFFSET (17 * 8 - vicii.screen_leftborderwidth)
+// Doubled for kawari
+#define DBUF_OFFSET (17 * 16 - vicii.screen_leftborderwidth)
 
 static int get_dummy(raster_cache_t *cache, unsigned int *xs, unsigned int *xe,
                      int rr)
@@ -88,10 +89,12 @@ inline static void _draw_dummy(uint8_t *p, unsigned int xs, unsigned int xe,
     uint8_t *src;
     uint8_t *dest;
 
-    src = &(vicii.dbuf[DBUF_OFFSET + xs * 8]);
-    dest = (p + xs * 8);
+    // Doubled for Kawari
+    src = &(vicii.dbuf[DBUF_OFFSET + xs * 16]);
+    dest = (p + xs * 16);
 
-    memcpy(dest, src, (xe - xs + 1) * 8);
+    // Doubled for Kawari
+    memcpy(dest, src, (xe - xs + 1) * 16);
 }
 
 static void draw_dummy(void)

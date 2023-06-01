@@ -573,12 +573,18 @@ static DRAW_INLINE void draw_sprites(int i)
             switch (sbuf_pixel_reg[as]) {
                 case 1:
                     render_buffer[i] = COL_D025;
+                    kawari_render_buffer[i*2] = COL_D025;
+                    kawari_render_buffer[i*2+1] = COL_D025;
                     break;
                 case 2:
                     render_buffer[i] = COL_D027 + as;
+                    kawari_render_buffer[i*2] = COL_D027 + as;
+                    kawari_render_buffer[i*2+1] = COL_D027 + as;
                     break;
                 case 3:
                     render_buffer[i] = COL_D026;
+                    kawari_render_buffer[i*2] = COL_D026;
+                    kawari_render_buffer[i*2+1] = COL_D026;
                     break;
                 default:
                     break;

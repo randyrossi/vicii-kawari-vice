@@ -346,7 +346,7 @@ static DRAW_INLINE void draw_kawari_graphics(int i, unsigned int cycle_flags)
            // TODO is background pixel
            break;
         case 0b011:
-           kawari_render_buffer[i] = (vicii.hires_color_base & 0b11) | (hires_pixel_value >> 2);
+           kawari_render_buffer[i] = ((vicii.hires_color_base & 0b11) << 2) | (hires_pixel_value >> 2);
            // TODO is background pixel
            break;
        default:

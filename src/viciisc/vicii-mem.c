@@ -666,7 +666,7 @@ void vicii_store(uint16_t addr, uint8_t value)
             break;
         case 0x37:                /* $D037: Unused */
             if (extra_regs_activated) {
-               vicii.hires_mode = (value & 0b01100000) >> 5;
+               vicii.hires_mode = (value & 0b11100000) >> 5;
                vicii.hires_enabled = (value & 0b00010000) >> 4;
                vicii.hires_allow_badlines = (value & 0b00001000) >> 3;
                vicii.hires_char_pixel_base = (value & 0b111);

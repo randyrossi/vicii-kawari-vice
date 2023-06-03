@@ -69,7 +69,7 @@ static signed long sresult;
 static uint8_t pixels_per_byte = 2;
 
 static uint8_t blit_flags;
-static uint8_t blit_done;
+static uint8_t blit_done = 1;
 static uint16_t blit_width;
 static uint16_t blit_height;
 static uint16_t blit_src_ptr;
@@ -1212,8 +1212,6 @@ void do_blit(void) {
        switch (blit_state) {
            case 0:
                if (blit_init) {
-                   //printf ("W:%d H:%d SRC:%04x S:%d\n",blit_width,blit_height,blit_src_ptr, blit_src_stride);
-                   //printf ("FL:%d DST:%04x S:%d\n", blit_flags, blit_dst_ptr, blit_dst_stride);
                    blit_src_cur = blit_src_ptr;
                    blit_dst_cur = blit_dst_ptr;
                    if (pixels_per_byte == 2) {
@@ -1355,8 +1353,10 @@ void do_blit(void) {
                } else {
                   if (pixels_per_byte == 2) {
                      blit_o = ((blit_o & 0b1111) << 4) | ((blit_d & 0b11110000) >> 4);
+                     blit_d = (blit_d & 0b1111) << 4;
                   } else {
                      blit_o = ((blit_o & 0b111111) << 2) | ((blit_d & 0b11000000) >> 6);
+                     blit_d = (blit_d & 0b111111) << 2;
                   }
                }
                blit_dst_avail = blit_dst_avail - 1;

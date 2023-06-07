@@ -290,7 +290,8 @@ inline static void d018_store(const uint8_t value)
 
 inline static void d019_store(const uint8_t value)
 {
-    vicii.irq_status &= ~((value & 0xf) | 0x80);
+    // Need to include dma irq for kawari
+    vicii.irq_status &= ~((value & (extra_regs_activated ? 0x1f : 0xf)) | 0x80);
     vicii_irq_set_line();
 
     VICII_DEBUG_REGISTER(("IRQ flag register: $%02X", vicii.irq_status));
@@ -298,7 +299,8 @@ inline static void d019_store(const uint8_t value)
 
 inline static void d01a_store(const uint8_t value)
 {
-    vicii.regs[0x1a] = value & 0xf;
+    // Need to include dma irq for kawari
+    vicii.regs[0x1a] = value & (extra_regs_activated ? 0x1f : 0xf);
 
     vicii_irq_set_line();
 
@@ -472,9 +474,6 @@ static void handle_dma(int fl, int value) {
            blit_state = 0;
            blit_init = 1;
         }
-   } else {
-        extraMem[extraRegs[0x39]+extraRegs[0x3a]*256+extraRegs[0x35]] = value;
-        autoincdec(fl, 0x39);
    }
 }
 
@@ -695,13 +694,22 @@ void vicii_store(uint16_t addr, uint8_t value)
             if (extra_regs_activated) {
               fl = (extraRegs[0x3f] & 0b11);
 
-              if (extraRegs[0x3F] & 32) {
-                 overlayMem[extraRegs[0x39]] = value;
-                 handle_color_change(extraRegs[0x39], value);
-                 handle_eeprom_save(extraRegs[0x39], value);
-                 autoincdec(fl, 0x39);
-              } else {
+              // Changed in 1.16 to unconditionally look at dma bits
+              // first. Used to include overlay flag in this condition
+              // but that prevented us from dma copying into overlay regs
+              if ((extraRegs[0x3f] & 0b1111) == 0b1111) {
                  handle_dma(fl, value);
+              } else {
+                 if (extraRegs[0x3F] & 32) {
+                    overlayMem[extraRegs[0x39]] = value;
+                    handle_color_change(extraRegs[0x39], value);
+                    handle_eeprom_save(extraRegs[0x39], value);
+                    autoincdec(fl, 0x39);
+                 } else {
+                    extraMem[extraRegs[0x39]+extraRegs[0x3a]*256+
+                       extraRegs[0x35]] = value;
+                    autoincdec(fl, 0x39);
+                 }
               }
             }
             break;
@@ -787,7 +795,7 @@ inline static uint8_t d01112_read(uint16_t addr)
 
 inline static uint8_t d019_read(void)
 {
-    return vicii.irq_status | 0x70;
+    return vicii.irq_status | (extra_regs_activated ? 0x60 : 0x70);
 }
 
 inline static uint8_t d01e_read(void)
@@ -922,7 +930,7 @@ uint8_t vicii_read(uint16_t addr)
             break;
 
         case 0x1a:                /* $D01A: IRQ mask register  */
-            value = vicii.regs[addr] | 0xf0;
+            value = vicii.regs[addr] | (extra_regs_activated ? 0xe0 : 0xf0);
             VICII_DEBUG_REGISTER(("Mask register: $%02X", value));
             break;
 
@@ -1098,7 +1106,7 @@ uint8_t vicii_read(uint16_t addr)
 
 inline static uint8_t d019_peek(void)
 {
-    return vicii.irq_status | 0x70;
+    return vicii.irq_status | (extra_regs_activated ? 0x60 : 0x70);
 }
 
 uint8_t vicii_peek(uint16_t addr)
@@ -1131,21 +1139,37 @@ void do_copy(void) {
 
    switch (dma_op) {
      case 1: // low to high
-       extraMem[copy_dest + copy_idx] = extraMem[copy_src + copy_idx];
+       if (extraRegs[0x3F] & 32) { // added in 1.16
+          overlayMem[(copy_dest + copy_idx) & 0xff] = 
+              extraMem[copy_src + copy_idx];
+          handle_color_change((copy_dest + copy_idx) & 0xff, 
+              extraMem[copy_src + copy_idx]);
+       } else {
+          extraMem[copy_dest + copy_idx] = extraMem[copy_src + copy_idx];
+       }
        copy_idx++;
        if (copy_idx == copy_num) {
            dma_op = 0;
            // done
+           vicii_irq_dma_set();
            extraRegs[0x35] = 0;
            extraRegs[0x36] = 0;
        }
        break;
      case 2: // high to low
-       extraMem[copy_dest+copy_idx] = extraMem[copy_src+copy_idx];
+       if (extraRegs[0x3F] & 32) { // added in 1.16
+          overlayMem[(copy_dest + copy_idx) & 0xff] =
+              extraMem[copy_src + copy_idx];
+          handle_color_change((copy_dest + copy_idx) & 0xff,
+              extraMem[copy_src + copy_idx]);
+       } else {
+          extraMem[copy_dest+copy_idx] = extraMem[copy_src+copy_idx];
+       }
        copy_idx--;
        if (copy_idx < 0) {
            dma_op = 0;
            // done
+           vicii_irq_dma_set();
            extraRegs[0x35] = 0;
            extraRegs[0x36] = 0;
        }
@@ -1165,6 +1189,7 @@ void do_fill(void) {
        if (fill_idx == fill_start + fill_num) {
           dma_op = 0;
           // done
+          vicii_irq_dma_set();
           extraRegs[0x35] = 0;
           extraRegs[0x36] = 0;
        }
@@ -1181,23 +1206,25 @@ void do_dma_xfer(void) {
    unsigned int bank = ~cia2 & 0x3;
    switch (dma_op) {
      case 8:
-       extraMem[copy_dest] = mem_bank_read(bank,copy_src,0);
+       extraMem[copy_dest] = mem_bank_read(bank,copy_src + 16384*bank,0);
        copy_src++; copy_dest++;
        copy_idx++;
        if (copy_idx == copy_num) {
           dma_op = 0;
           // done
+          vicii_irq_dma_set();
           extraRegs[0x35] = 0;
           extraRegs[0x36] = 0;
        }
        break;
      case 16:
-       mem_bank_write(bank, copy_dest, extraMem[copy_src], 0);
+       mem_bank_write(bank, copy_dest + 16384*bank, extraMem[copy_src], 0);
        copy_src++; copy_dest++;
        copy_idx++;
        if (copy_idx == copy_num) {
           dma_op = 0;
           // done
+          vicii_irq_dma_set();
           extraRegs[0x35] = 0;
           extraRegs[0x36] = 0;
        }
@@ -1287,11 +1314,12 @@ void do_blit(void) {
                       blit_s = (blit_s & 0xf) << 4;
                       blit_src_avail = blit_src_avail - 1;
                   } else {
+                      // NOTE: Had a blitter bug in < 1.16
                       if (blit_src_align == 1) {
                          blit_s = (blit_s & 0b111111) << 2;
-                      } else if (blit_src_align == 2) {
+                      } else if (blit_src_align == 2) { // was dst in < 1.16
                          blit_s = (blit_s & 0b1111) << 4;
-                      } else if (blit_src_align == 3) {
+                      } else if (blit_src_align == 3) { // was dst in < 1.16
                          blit_s = (blit_s & 0b11) << 6;
                       }
                       blit_src_avail = 4 - blit_src_align;
@@ -1353,9 +1381,13 @@ void do_blit(void) {
                } else {
                   if (pixels_per_byte == 2) {
                      blit_o = ((blit_o & 0b1111) << 4) | ((blit_d & 0b11110000) >> 4);
+                     // Next line was missing in < 1.16 but did not matter
+                     // since there are only two pixels
                      blit_d = (blit_d & 0b1111) << 4;
                   } else {
                      blit_o = ((blit_o & 0b111111) << 2) | ((blit_d & 0b11000000) >> 6);
+                     // Next line was missing in < 1.16 and caused right edge
+                     // to be destroyed sometimes
                      blit_d = (blit_d & 0b111111) << 2;
                   }
                }
@@ -1389,6 +1421,7 @@ void do_blit(void) {
                        if (blit_line == blit_height) {
                           blit_done = 1;
                           extraRegs[0x3d] = 0; // signal done
+                          vicii_irq_dma_set();
                        }
                    }
                }

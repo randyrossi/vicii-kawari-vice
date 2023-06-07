@@ -427,11 +427,14 @@ void vicii_powerup(void)
     }
     fclose(fp);
 
-    overlayMem[0x83] = (1 << 4) | 1;
+    overlayMem[0x83] = 1; // major
+    overlayMem[0x84] = 16; // minor
     overlayMem[0x90] = 'S';
     overlayMem[0x91] = 'I';
     overlayMem[0x92] = 'M';
     overlayMem[0x93] = '\0';
+    overlayMem[0x87] = 1+2+8+64+128; // TODO
+    overlayMem[0x88] = '\0';
     // TODO Other flags and read-only stuff should go here
 
     // Install colors now

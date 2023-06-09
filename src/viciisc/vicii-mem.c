@@ -1129,6 +1129,29 @@ uint8_t vicii_peek(uint16_t addr)
             return vicii.sprite_sprite_collisions;
         case 0x1f:            /* $D01F: Sprite-background collision */
             return vicii.sprite_background_collisions;
+        case 0x2f:
+        case 0x30:
+        case 0x31:
+        case 0x32:
+        case 0x33:
+        case 0x34:
+        case 0x35:
+        case 0x36:
+        case 0x37:
+        case 0x38:
+        case 0x39:
+        case 0x3a:
+        case 0x3b:
+        case 0x3c:
+        case 0x3d:
+        case 0x3e:
+        case 0x3f:
+            if (extra_regs_activated) {
+              return extraRegs[addr];
+            } else {
+              return vicii.regs[addr] | unused_bits_in_registers[addr];
+            }
+            break;
         default:
             return vicii.regs[addr] | unused_bits_in_registers[addr];
     }

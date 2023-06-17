@@ -48,9 +48,9 @@
 static char* flash_file_name = NULL;
 static int extra_regs_activated = 0;
 static int extra_regs_activation_counter = 0;
-unsigned char extraRegs[64];
-unsigned char extraMem[65536];
-unsigned char overlayMem[256];
+uint8_t extraRegs[64];
+uint8_t extraMem[65536];
+uint8_t overlayMem[256];
 static unsigned char u_op_1_hi;
 static unsigned char u_op_1_lo;
 static unsigned char u_op_2_hi;
@@ -108,6 +108,8 @@ static uint8_t fill_b;
 static uint16_t fill_idx;
 
 static void handle_eeprom_save(int reg, int value);
+static uint8_t read_vram(uint16_t addr) { return extraMem[addr]; }
+static void write_vram(uint16_t addr, uint8_t value) { extraMem[addr] = value; }
 
 /* Unused bits in VIC-II registers: these are always 1 when read.  */
 static const uint8_t unused_bits_in_registers[0x40] =
@@ -481,6 +483,7 @@ static void handle_dma(int fl, int value) {
 void vicii_store(uint16_t addr, uint8_t value)
 {
     int fl;
+    uint16_t tmpaddr;
     addr &= 0x3f;
 
     vicii.last_bus_phi2 = value;
@@ -706,8 +709,8 @@ void vicii_store(uint16_t addr, uint8_t value)
                     handle_eeprom_save(extraRegs[0x39], value);
                     autoincdec(fl, 0x39);
                  } else {
-                    extraMem[extraRegs[0x39]+extraRegs[0x3a]*256+
-                       extraRegs[0x35]] = value;
+                    tmpaddr = extraRegs[0x39]+extraRegs[0x3a]*256+                                                   extraRegs[0x35];
+                    write_vram(tmpaddr, value);
                     autoincdec(fl, 0x39);
                  }
               }
@@ -730,8 +733,9 @@ void vicii_store(uint16_t addr, uint8_t value)
                  handle_color_change(extraRegs[0x3c], value);
                  handle_eeprom_save(extraRegs[0x3c], value);
               } else {
-                 extraMem[extraRegs[0x3c]+
-                    extraRegs[0x3d]*256+extraRegs[0x36]] = value;
+                 tmpaddr = extraRegs[0x3c]+
+                    extraRegs[0x3d]*256+extraRegs[0x36];
+                 write_vram(tmpaddr, value);
               }
               fl = (extraRegs[0x3f] & 0b1100) >> 2;
               autoincdec(fl, 0x3c);
@@ -765,6 +769,22 @@ void vicii_poke(uint16_t addr, uint8_t value)
     if ((addr >= 0x20) && (addr <= 0x2e)) {
         vicii_monitor_colreg_store(addr, value);
         return;
+    } else if (addr == 0x3f) {
+        if (value & 0x80) {
+                   printf ("RAM dump\n");
+                   int memaddr = 0;
+                   while (memaddr < 65536) {
+                     printf ("%04x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",memaddr, extraMem[memaddr],extraMem[memaddr+1],extraMem[memaddr+2],extraMem[memaddr+3],extraMem[memaddr+4],extraMem[memaddr+5],extraMem[memaddr+6],extraMem[memaddr+7],extraMem[memaddr+8],extraMem[memaddr+9],extraMem[memaddr+10],extraMem[memaddr+11],extraMem[memaddr+12],extraMem[memaddr+13],extraMem[memaddr+14],extraMem[memaddr+15]);
+                     memaddr+=16;
+                   }
+
+                   printf ("Overlay\n");
+                   memaddr=0;
+                   while (memaddr < 256) {
+                     printf ("%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",memaddr, overlayMem[memaddr],overlayMem[memaddr+1],overlayMem[memaddr+2],overlayMem[memaddr+3],overlayMem[memaddr+4],overlayMem[memaddr+5],overlayMem[memaddr+6],overlayMem[memaddr+7],overlayMem[memaddr+8],overlayMem[memaddr+9],overlayMem[memaddr+10],overlayMem[memaddr+11],overlayMem[memaddr+12],overlayMem[memaddr+13],overlayMem[memaddr+14],overlayMem[memaddr+15]);
+                     memaddr+=16;
+                   }
+        }
     }
     vicii_store(addr, value);
 }
@@ -843,6 +863,7 @@ inline static uint8_t d01f_read(void)
 uint8_t vicii_read(uint16_t addr)
 {
     int fl;
+    uint16_t tmpaddr;
     uint8_t value;
     addr &= 0x3f;
 
@@ -1056,8 +1077,8 @@ uint8_t vicii_read(uint16_t addr)
                if (extraRegs[0x3F] & 32) {
                   value = overlayMem[extraRegs[0x39]];
                } else {
-                  value = extraMem[extraRegs[0x39]+
-                    extraRegs[0x3a]*256+extraRegs[0x35]];
+                  value = read_vram(extraRegs[0x39]+
+                    extraRegs[0x3a]*256+extraRegs[0x35]);
                }
                fl = (extraRegs[0x3f] & 0b11);
                autoincdec(fl, 0x39);
@@ -1082,8 +1103,9 @@ uint8_t vicii_read(uint16_t addr)
                if (extraRegs[0x3F] & 32) {
                   value = overlayMem[extraRegs[0x3c]];
                } else {
-                  value = extraMem[extraRegs[0x3c]+
-                    extraRegs[0x3d]*256+extraRegs[0x36]];
+                  tmpaddr = extraRegs[0x3c]+
+                    extraRegs[0x3d]*256+extraRegs[0x36];
+                  value = read_vram(tmpaddr);
                }
                fl = (extraRegs[0x3f] & 0b1100) >> 2;
                autoincdec(fl, 0x3c);
@@ -1163,12 +1185,10 @@ void do_copy(void) {
    switch (dma_op) {
      case 1: // low to high
        if (extraRegs[0x3F] & 32) { // added in 1.16
-          overlayMem[(copy_dest + copy_idx) & 0xff] = 
-              extraMem[copy_src + copy_idx];
-          handle_color_change((copy_dest + copy_idx) & 0xff, 
-              extraMem[copy_src + copy_idx]);
+          overlayMem[(copy_dest + copy_idx) & 0xff] = read_vram(copy_src + copy_idx);
+          handle_color_change((copy_dest + copy_idx) & 0xff, read_vram(copy_src + copy_idx));
        } else {
-          extraMem[copy_dest + copy_idx] = extraMem[copy_src + copy_idx];
+          write_vram(copy_dest + copy_idx, read_vram(copy_src + copy_idx));
        }
        copy_idx++;
        if (copy_idx == copy_num) {
@@ -1181,12 +1201,11 @@ void do_copy(void) {
        break;
      case 2: // high to low
        if (extraRegs[0x3F] & 32) { // added in 1.16
-          overlayMem[(copy_dest + copy_idx) & 0xff] =
-              extraMem[copy_src + copy_idx];
+          overlayMem[(copy_dest + copy_idx) & 0xff] = read_vram(copy_src + copy_idx);
           handle_color_change((copy_dest + copy_idx) & 0xff,
-              extraMem[copy_src + copy_idx]);
+              read_vram(copy_src + copy_idx));
        } else {
-          extraMem[copy_dest+copy_idx] = extraMem[copy_src+copy_idx];
+          write_vram(copy_dest+copy_idx, read_vram(copy_src+copy_idx));
        }
        copy_idx--;
        if (copy_idx < 0) {
@@ -1207,7 +1226,7 @@ void do_fill(void) {
 
    switch (dma_op) {
      case 4:
-       extraMem[fill_idx] = fill_b;
+       write_vram(fill_idx, fill_b);
        fill_idx++;
        if (fill_idx == fill_start + fill_num) {
           dma_op = 0;
@@ -1229,7 +1248,7 @@ void do_dma_xfer(void) {
    unsigned int bank = ~cia2 & 0x3;
    switch (dma_op) {
      case 8:
-       extraMem[copy_dest] = mem_bank_read(bank,copy_src + 16384*bank,0);
+       write_vram(copy_dest, mem_bank_read(bank,copy_src + 16384*bank,0));
        copy_src++; copy_dest++;
        copy_idx++;
        if (copy_idx == copy_num) {
@@ -1241,7 +1260,7 @@ void do_dma_xfer(void) {
        }
        break;
      case 16:
-       mem_bank_write(bank, copy_dest + 16384*bank, extraMem[copy_src], 0);
+       mem_bank_write(bank, copy_dest + 16384*bank, read_vram(copy_src), 0);
        copy_src++; copy_dest++;
        copy_idx++;
        if (copy_idx == copy_num) {
@@ -1291,7 +1310,7 @@ void do_blit(void) {
             case 3:
                if (blit_dst_avail == 0) {
                     blit_dst_avail = pixels_per_byte;
-                    blit_d = extraMem[blit_tmp_addr];
+                    blit_d = read_vram(blit_tmp_addr);
                }
                if (blit_src_avail == 0) {
                     blit_tmp_addr = blit_src_cur + blit_src_pos;
@@ -1302,7 +1321,7 @@ void do_blit(void) {
             case 5:
                if (blit_src_avail == 0) {
                    blit_src_avail = pixels_per_byte;
-                   blit_s = extraMem[blit_tmp_addr];
+                   blit_s = read_vram(blit_tmp_addr);
                    blit_src_pos = blit_src_pos + 1;
                }
                // Handle dst misalignment
@@ -1419,7 +1438,7 @@ void do_blit(void) {
                break;
             case 7:
                if (blit_out_avail == pixels_per_byte) {
-                   extraMem[blit_dst_cur + blit_dst_pos] = blit_o;
+                   write_vram(blit_dst_cur + blit_dst_pos, blit_o);
                    blit_out_avail = 0;
                    blit_dst_pos = blit_dst_pos + 1;
                    if (blit_pixels_written >= blit_width) {

@@ -103,6 +103,18 @@ void vicii_irq_lightpen_clear(void)
     vicii_irq_set_line();
 }
 
+void vicii_irq_dma_set(void)
+{
+    vicii.irq_status |= 0x10;
+    vicii_irq_set_line();
+}
+
+void vicii_irq_dma_clear(void)
+{
+    vicii.irq_status &= 0xef;
+    vicii_irq_set_line();
+}
+
 void vicii_irq_set_raster_line(unsigned int line)
 {
 }

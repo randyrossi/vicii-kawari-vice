@@ -37,6 +37,8 @@ extern void vicii_irq_sscoll_set(void);
 extern void vicii_irq_sscoll_clear(void);
 extern void vicii_irq_lightpen_set(void);
 extern void vicii_irq_lightpen_clear(void);
+extern void vicii_irq_dma_set(void);
+extern void vicii_irq_dma_clear(void);
 
 extern void vicii_irq_set_raster_line(unsigned int line);
 extern void vicii_irq_check_state(uint8_t value, unsigned int high);

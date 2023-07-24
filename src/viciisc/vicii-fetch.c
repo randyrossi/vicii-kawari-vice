@@ -288,7 +288,7 @@ void vicii_fetch_kawari_graphics(int phase)
         break;
       case 0b010:
       case 0b011:
-        addr = vicii.hires_fvc;
+        addr = ((vicii.hires_matrix_base & 0b1) << 15) | vicii.hires_fvc;
         break;
       default:
         break;
@@ -310,11 +310,11 @@ void vicii_fetch_kawari_graphics(int phase)
         break;
       case 0b001:
       case 0b100:
-        addr = vicii.hires_fvc >> 1;
+        addr = ((vicii.hires_matrix_base & 0b11) << 14) | vicii.hires_fvc >> 1;
         break;
       case 0b010:
       case 0b011:
-        addr = vicii.hires_fvc | 1;
+        addr = ((vicii.hires_matrix_base & 0b1) << 15) | vicii.hires_fvc | 1;
         break;
       default:
         break;

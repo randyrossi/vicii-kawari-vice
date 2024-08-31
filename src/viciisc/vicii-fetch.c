@@ -278,7 +278,7 @@ void vicii_fetch_kawari_graphics(int phase)
 {
     static uint16_t addr;
 
-    uint16_t hires_cursor_addr = overlayMem[0x85] + (overlayMem[0x86] * 256);
+    uint16_t hires_cursor_addr = overlayMem[0x85] + ((overlayMem[0x86] & 0x7f) * 256);
 
     switch (vicii.hires_mode) {
       case 0b000: // text

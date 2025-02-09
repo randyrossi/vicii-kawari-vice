@@ -383,28 +383,31 @@ void vicii_powerup(void)
         temp_name = strrchr(flash_file_name, ARCHDEP_DIR_SEP_CHR);
         if (temp_name) {
             *temp_name = 0;
-        } else {
-            lib_free(flash_file_name);
-            flash_file_name = NULL;
         }
     }
-    /* workaound end */
-    if (!flash_file_name) {
+    else
+    {
         flash_file_name = lib_malloc(maxpathlen);
         archdep_getcwd(flash_file_name, maxpathlen);
     }
+`
+    char *ffname = lib_malloc(maxpathlen); // never freed
+    strcpy (ffname, flash_file_name);
+    lib_free(flash_file_name);
 
-    int len = strlen(flash_file_name);
-    flash_file_name[len] = ARCHDEP_DIR_SEP_CHR;
-    flash_file_name[len+1] = '\0';
-    strcat(flash_file_name, "kawari_flash.bin");
+    int len = strlen(ffname);
+    ffname[len] = ARCHDEP_DIR_SEP_CHR;
+    ffname[len+1] = '\0';
+    strcat(ffname, "kawari_flash.bin");
+
+    printf ("Using %s for kawari flash file\n", ffname);
 
     vicii.hires_allow_badlines = 1;
-    FILE *fp = fopen(flash_file_name,"r");
+    FILE *fp = fopen(ffname,"r");
     if (fp == NULL) {
-        fp = fopen(flash_file_name,"w");
+        fp = fopen(ffname,"w");
         if (fp == NULL) {
-            printf ("Can't create %s\n", flash_file_name);
+            printf ("Can't create %s\n", ffname);
             exit(-1);
         }
 
@@ -412,14 +415,14 @@ void vicii_powerup(void)
         for (int i=0;i<256;i++) { fputc(defaultFlash[i], fp); }
         fclose(fp);
 
-        fp = fopen(flash_file_name,"r");
+        fp = fopen(ffname,"r");
         if (fp == NULL) {
-            printf ("Can't create %s\n", flash_file_name);
+            printf ("Can't create %s\n", ffname);
             exit(-1);
         }
     }
 
-    set_flash_file_name(flash_file_name);
+    set_flash_file_name(ffname);
 
     // TODO Pick bank here. For now, one bank.
     for (int i=0;i<256;i++) {

@@ -46,8 +46,16 @@
 #include "viciitypes.h"
 
 static char* flash_file_name = NULL;
+static char* fpga_flash_file_name = NULL;
 static int extra_regs_activated = 0;
 static int extra_regs_activation_counter = 0;
+static int flash_reg_activated = 0;
+static int flash_reg_activated_counter = 0;
+static int flash_tick_count = 0;
+static int flash_byte_count = 0;
+static int flash_busy = 0;
+static int flash_op = 0;
+static int flash_verify_error = 0;
 uint8_t extraRegs[64];
 uint8_t extraMem[65536];
 uint8_t overlayMem[256];
@@ -107,9 +115,16 @@ static uint16_t fill_num;
 static uint8_t fill_b;
 static uint16_t fill_idx;
 
+static uint16_t flash_bulk_vmem_addr;
+static uint16_t flash_bulk_flash_addr;
+
 static void handle_eeprom_save(int reg, int value);
 static uint8_t read_vram(uint16_t addr) { return extraMem[addr]; }
 static void write_vram(uint16_t addr, uint8_t value) { extraMem[addr] = value; }
+
+#define FLASH_BULK_OP 128
+#define FLASH_BULK_WRITE 1
+#define FLASH_BULK_READ  2
 
 /* Unused bits in VIC-II registers: these are always 1 when read.  */
 static const uint8_t unused_bits_in_registers[0x40] =
@@ -479,6 +494,38 @@ static void handle_dma(int fl, int value) {
    }
 }
 
+static custom_state = 0;
+static void vicii_custom(uint8_t value) {
+   FILE* fp = NULL;
+   if (custom_state == 0 && value == 128) {
+       custom_state = 1;
+   }
+   else if (custom_state == 1) {
+       custom_state = 0;
+       // LOAD assets.bin file into VMEM 0x8000
+       switch (value) {
+        case 0:
+          fp = fopen(
+              "/shared/Vivado/vicii-kawari/games/him/assets/assets.bin","r");
+          if (fp != NULL) {
+             for (int ii=0;ii<32000;ii++) extraMem[0x8000+ii] = fgetc(fp);
+             fclose(fp);
+          }
+          break;
+        case 1:
+          fp = fopen(
+              "/shared/Vivado/vicii-kawari/games/him/title.bin","r");
+          if (fp != NULL) {
+             for (int ii=0;ii<16384;ii++) extraMem[0x0000+ii] = fgetc(fp);
+             fclose(fp);
+          }
+          break;
+       }
+ 
+      
+   }
+}
+
 /* Store a value in a VIC-II register.  */
 void vicii_store(uint16_t addr, uint8_t value)
 {
@@ -658,6 +705,59 @@ void vicii_store(uint16_t addr, uint8_t value)
             }
             break;
         case 0x34:                /* $D034: Unused */
+            if (!flash_reg_activated) {
+                if (value == 'S') {
+                   flash_reg_activated_counter = 1;
+                } else if (value == 'P' && flash_reg_activated_counter == 1) {
+                   flash_reg_activated_counter++;
+                } else if (value == 'I' && flash_reg_activated_counter == 2) {
+                   flash_reg_activated_counter = 0;
+                   flash_reg_activated = 1;
+                   printf ("SPI activated\n");
+                } else {
+                   flash_reg_activated_counter = 0;
+                }
+            } else {
+               if ((value & 0b10000000) == FLASH_BULK_OP) {
+                   if ((value & 0b11) == FLASH_BULK_READ)
+                   {
+                       // POKE(VIDEO_MEM_FLAGS, 0);
+                       // POKE(VIDEO_MEM_1_IDX,(start_addr >> 16) & 0xff);
+                       // POKE(VIDEO_MEM_1_HI,(start_addr >> 8) & 0xff);
+                       // POKE(VIDEO_MEM_1_LO,(start_addr & 0xff));
+                       // POKE(VIDEO_MEM_2_HI, 0);
+                       // POKE(VIDEO_MEM_2_LO, 0);
+                       flash_bulk_vmem_addr = extraRegs[0x3D]*256+extraRegs[0x3C];
+                       flash_bulk_flash_addr = extraRegs[0x35]*65536+extraRegs[0x3A]*256+extraRegs[0x39];
+                       // 4k page assumed (efinix)
+                       flash_tick_count = 0;      
+                       flash_byte_count = 0;      
+                       flash_busy = 1;      
+                       flash_op = FLASH_BULK_READ;      
+                   } 
+                   else if ((value & 0b11) == FLASH_BULK_WRITE)
+                   {
+                       // POKE(VIDEO_MEM_FLAGS, 0);
+                       // POKE(VIDEO_MEM_1_IDX,(start_addr >> 16) & 0xff);
+                       // POKE(VIDEO_MEM_1_HI,(start_addr >> 8) & 0xff);
+                       // POKE(VIDEO_MEM_1_LO,(start_addr & 0xff));
+                       // POKE(VIDEO_MEM_2_HI, 0);
+                       // POKE(VIDEO_MEM_2_LO, 0);
+                       // mprintf ("READ FLASH,");
+                       // POKE(SPI_REG, FLASH_BULK_OP | FLASH_BULK_READ);
+                       flash_bulk_vmem_addr = extraRegs[0x3D]*256+extraRegs[0x3C];
+                       flash_bulk_flash_addr = extraRegs[0x35]*65536+extraRegs[0x3A]*256+extraRegs[0x39];
+                       // 4k page assumed (efinix)
+                       flash_tick_count = 0;      
+                       flash_byte_count = 0;      
+                       flash_busy = 1;      
+                       flash_op = FLASH_BULK_WRITE;      
+                   }
+               } else {
+                   printf ("WARNING: Direct SPI access not yet emulated!\n");
+               }
+            }
+            break;
         case 0x35:                /* $D035: Unused */
             if (extra_regs_activated)
                extraRegs[addr] = value;
@@ -743,7 +843,18 @@ void vicii_store(uint16_t addr, uint8_t value)
             break;
         case 0x3f:                /* $D03F: Unused */
             if (extra_regs_activated) {
-                extraRegs[addr] = value;
+                if (value & 128) {
+                  // For emulator, instead of using this bit to disable
+                  // kawari extensions, we use it as an escape function
+                  // to invoke special hooks to make dev easier. When this
+                  // bit is on, we pass to vicii_custom.
+                  vicii_custom(value);
+                } else {
+                  // Only if custom state is 0 (not escaped) do we set the
+                  // value, otherwise, pass through to custom func.
+                  if (custom_state == 0) extraRegs[addr] = value;
+                  else vicii_custom(value);
+                }
             } else {
                 if (value == 'V') {
                    extra_regs_activation_counter = 1;
@@ -771,6 +882,8 @@ void vicii_poke(uint16_t addr, uint8_t value)
         return;
     } else if (addr == 0x3f) {
         if (value & 0x80) {
+
+
                    printf ("RAM dump\n");
                    int memaddr = 0;
                    while (memaddr < 65536) {
@@ -1033,7 +1146,7 @@ uint8_t vicii_read(uint16_t addr)
             value = divzero;
             break;
         case 0x34:
-            value = 0x0; // Use 0x04 to fake bad verify
+            value = (flash_busy << 1) | (flash_verify_error << 2);
             break;
         case 0x35: // ptr 1 idx
             if (extra_regs_activated)
@@ -1218,6 +1331,61 @@ void do_copy(void) {
        break;
      default:
        break;
+   }
+}
+
+void do_flash(void) {
+   // We want to emulate the same amount of cpu time
+   // it would take on the actual device.  This call
+   // represents one tick of the flash state machine
+   //
+   // For write, 42 write + 18 wait + 42 verify per byte
+   // For read, 42 read per byte
+   if (flash_op == FLASH_BULK_WRITE) {
+      // Write from VMEM to FLASH
+      flash_tick_count++;
+      if (flash_tick_count == 42+18+42) {
+          flash_tick_count = 0;
+          // All ticks for the next byte are complete.
+          // Write from vmem flash_bulk_vmem to flash flash_bulk_flash_addr
+          // Not the most efficient. We should fill a 4k buffer then
+          // dump it in one write at the end... TODO
+          FILE *fp = fopen(fpga_flash_file_name,"r+b");
+          fseek(fp, flash_bulk_flash_addr, SEEK_SET);
+          char ch = read_vram(flash_bulk_vmem_addr);
+          fwrite(&ch, 1, 1, fp);
+          fclose(fp);
+          flash_bulk_vmem_addr++;
+          flash_bulk_flash_addr++;
+          flash_byte_count++;
+          if (flash_byte_count == 4096) { // assume efinix
+             flash_op = 0;
+             flash_busy = 0;
+             flash_verify_error = 0; // assume always good
+          }
+      }
+   } else if (flash_op == FLASH_BULK_READ) {
+      // Read flash into VMEM
+      flash_tick_count++;
+      if (flash_tick_count == 42) {
+          flash_tick_count = 0;
+          // Not the most efficient.  We should fill a 4k buffer in one
+          // read and set vram at the end. TODO
+          FILE *fp = fopen(fpga_flash_file_name,"r");
+          fseek(fp, flash_bulk_flash_addr, SEEK_SET);
+          uint8_t ch;
+          fread(&ch, 1, 1, fp);
+          write_vram(flash_bulk_vmem_addr, ch);
+          fclose(fp);
+          flash_bulk_vmem_addr++;
+          flash_bulk_flash_addr++;
+          flash_byte_count++;
+          if (flash_byte_count == 4096) { // assume efinix
+             flash_op = 0;
+             flash_busy = 0;
+             flash_verify_error = 0; // assume always good
+          }
+      }
    }
 }
 
@@ -1529,5 +1697,9 @@ static void handle_eeprom_save(int reg, int value) {
 
 void set_flash_file_name(char* fname) {
    flash_file_name = fname;
+}
+
+void set_fpga_flash_file_name(char* fname) {
+   fpga_flash_file_name = fname;
 }
 

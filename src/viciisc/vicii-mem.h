@@ -48,9 +48,11 @@ extern void viciidtv_update_colorram(void);
 
 
 extern void set_flash_file_name(char* fname);
+extern void set_fpga_flash_file_name(char* fname);
 extern void handle_color_change(uint8_t reg, uint8_t value);
 extern void do_copy(void);
 extern void do_fill(void);
+extern void do_flash(void);
 extern void do_dma_xfer(void);
 extern void do_blit(void);
 #endif

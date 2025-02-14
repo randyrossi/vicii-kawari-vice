@@ -476,6 +476,10 @@ int vicii_cycle(void)
     do_fill();
     do_fill();
 
+    // 2 ticks per half cycle for flash
+    do_flash();
+    do_flash();
+
     // Do DMA on idle cycles
     if (vicii.idle_state) {
         do_dma_xfer();

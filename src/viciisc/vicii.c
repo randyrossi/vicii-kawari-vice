@@ -390,24 +390,33 @@ void vicii_powerup(void)
         flash_file_name = lib_malloc(maxpathlen);
         archdep_getcwd(flash_file_name, maxpathlen);
     }
-`
-    char *ffname = lib_malloc(maxpathlen); // never freed
-    strcpy (ffname, flash_file_name);
+
+    char *cfgFlashName = lib_malloc(maxpathlen); // never freed
+    char *fpgaFlashName = lib_malloc(maxpathlen); // never freed
+    strcpy (cfgFlashName, flash_file_name);
+    strcpy (fpgaFlashName, flash_file_name);
     lib_free(flash_file_name);
 
-    int len = strlen(ffname);
-    ffname[len] = ARCHDEP_DIR_SEP_CHR;
-    ffname[len+1] = '\0';
-    strcat(ffname, "kawari_flash.bin");
+    int len = strlen(cfgFlashName);
+    cfgFlashName[len] = ARCHDEP_DIR_SEP_CHR;
+    cfgFlashName[len+1] = '\0';
+    strcat(cfgFlashName, "kawari_flash.bin");
 
-    printf ("Using %s for kawari flash file\n", ffname);
+    len = strlen(fpgaFlashName);
+    fpgaFlashName[len] = ARCHDEP_DIR_SEP_CHR;
+    fpgaFlashName[len+1] = '\0';
+    strcat(fpgaFlashName, "kawari_fpga_flash.bin");
+
+    printf ("Using %s for kawari config flash file\n", cfgFlashName);
+    printf ("Using %s for kawari fpga flash file\n", fpgaFlashName);
 
     vicii.hires_allow_badlines = 1;
-    FILE *fp = fopen(ffname,"r");
+
+    FILE *fp = fopen(cfgFlashName,"r");
     if (fp == NULL) {
-        fp = fopen(ffname,"w");
+        fp = fopen(cfgFlashName,"w");
         if (fp == NULL) {
-            printf ("Can't create %s\n", ffname);
+            printf ("Can't create %s\n", cfgFlashName);
             exit(-1);
         }
 
@@ -415,18 +424,33 @@ void vicii_powerup(void)
         for (int i=0;i<256;i++) { fputc(defaultFlash[i], fp); }
         fclose(fp);
 
-        fp = fopen(ffname,"r");
+        fp = fopen(cfgFlashName,"r");
         if (fp == NULL) {
-            printf ("Can't create %s\n", ffname);
+            printf ("Can't create %s\n", cfgFlashName);
             exit(-1);
         }
     }
 
-    set_flash_file_name(ffname);
+    set_flash_file_name(cfgFlashName);
+    set_fpga_flash_file_name(fpgaFlashName);
 
     // TODO Pick bank here. For now, one bank.
     for (int i=0;i<256;i++) {
        overlayMem[i] = fgetc(fp);
+    }
+    fclose(fp);
+
+    // Now FPGA flash
+    fp = fopen(fpgaFlashName,"r");
+    if (fp == NULL) {
+        fp = fopen(fpgaFlashName,"w");
+        if (fp == NULL) {
+            printf ("Can't create %s\n", fpgaFlashName);
+            exit(-1);
+        }
+
+        // Blank 2Mb
+        for (int i=0;i<2*1024*1024;i++) { fputc(0, fp); }
     }
     fclose(fp);
 

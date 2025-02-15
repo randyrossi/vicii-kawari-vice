@@ -56,6 +56,7 @@ static int flash_byte_count = 0;
 static int flash_busy = 0;
 static int flash_op = 0;
 static int flash_verify_error = 0;
+static uint8_t flash_page[4096];
 uint8_t extraRegs[64];
 uint8_t extraMem[65536];
 uint8_t overlayMem[256];
@@ -1347,18 +1348,16 @@ void do_flash(void) {
       if (flash_tick_count == 42+18+42) {
           flash_tick_count = 0;
           // All ticks for the next byte are complete.
-          // Write from vmem flash_bulk_vmem to flash flash_bulk_flash_addr
-          // Not the most efficient. We should fill a 4k buffer then
-          // dump it in one write at the end... TODO
-          FILE *fp = fopen(fpga_flash_file_name,"r+b");
-          fseek(fp, flash_bulk_flash_addr, SEEK_SET);
-          char ch = read_vram(flash_bulk_vmem_addr);
-          fwrite(&ch, 1, 1, fp);
-          fclose(fp);
+          // Write to the page buf
+          flash_page[flash_byte_count]=read_vram(flash_bulk_vmem_addr);
           flash_bulk_vmem_addr++;
-          flash_bulk_flash_addr++;
           flash_byte_count++;
           if (flash_byte_count == 4096) { // assume efinix
+             // Persist the page
+             FILE *fp = fopen(fpga_flash_file_name,"r+b");
+             fseek(fp, flash_bulk_flash_addr, SEEK_SET);
+             fwrite(&flash_page[0], 4096, 1, fp);
+             fclose(fp);
              flash_op = 0;
              flash_busy = 0;
              flash_verify_error = 0; // assume always good
@@ -1369,18 +1368,18 @@ void do_flash(void) {
       flash_tick_count++;
       if (flash_tick_count == 42) {
           flash_tick_count = 0;
-          // Not the most efficient.  We should fill a 4k buffer in one
-          // read and set vram at the end. TODO
-          FILE *fp = fopen(fpga_flash_file_name,"r");
-          fseek(fp, flash_bulk_flash_addr, SEEK_SET);
-          uint8_t ch;
-          fread(&ch, 1, 1, fp);
-          write_vram(flash_bulk_vmem_addr, ch);
-          fclose(fp);
-          flash_bulk_vmem_addr++;
-          flash_bulk_flash_addr++;
           flash_byte_count++;
           if (flash_byte_count == 4096) { // assume efinix
+             // Read the whole page at once
+             FILE *fp = fopen(fpga_flash_file_name,"r");
+             fseek(fp, flash_bulk_flash_addr, SEEK_SET);
+             fread(&flash_page[0], 4096, 1, fp);
+             fclose(fp);
+    
+             for (int i=0;i<4096;i++) {
+                write_vram(flash_bulk_vmem_addr, flash_page[i]);
+                flash_bulk_vmem_addr++;
+             }
              flash_op = 0;
              flash_busy = 0;
              flash_verify_error = 0; // assume always good

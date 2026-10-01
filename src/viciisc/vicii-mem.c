@@ -1132,22 +1132,40 @@ uint8_t vicii_read(uint16_t addr)
 
         // Kawari: Extra regs PEEK handled here.
         case 0x2f:
-            value = u_op_1_hi;
+            if (extra_regs_activated)
+                value = u_op_1_hi;
+            else
+                value = 0xff;
             break;
         case 0x30:
-            value = u_op_1_lo;
+            if (extra_regs_activated)
+                value = u_op_1_lo;
+            else
+                value = 0xff;
             break;
         case 0x31:
-            value = u_op_2_hi;
+            if (extra_regs_activated)
+                value = u_op_2_hi;
+            else
+                value = 0xff;
             break;
         case 0x32:
-            value = u_op_2_lo;
+            if (extra_regs_activated)
+                value = u_op_2_lo;
+            else
+                value = 0xff;
             break;
         case 0x33:
-            value = divzero;
+            if (extra_regs_activated)
+                value = divzero;
+            else
+                value = 0xff;
             break;
         case 0x34:
-            value = (flash_busy << 1) | (flash_verify_error << 2);
+            if (extra_regs_activated)
+                value = (flash_busy << 1) | (flash_verify_error << 2);
+            else
+                value = 0xff;
             break;
         case 0x35: // ptr 1 idx
             if (extra_regs_activated)

@@ -47,6 +47,7 @@
 #include "screenshot.h"
 #include "types.h"
 #include "vicii-chip-model.h"
+#include "vicii-coproc.h"
 #include "vicii-cmdline-options.h"
 #include "vicii-color.h"
 #include "vicii-cycle.h"
@@ -304,6 +305,8 @@ struct video_canvas_s *vicii_get_canvas(void)
 void vicii_reset(void)
 {
     raster_reset(&vicii.raster);
+
+    vicii_coproc_reset();
 
     vicii.raster_line = 0;
     vicii.raster_cycle = 6;

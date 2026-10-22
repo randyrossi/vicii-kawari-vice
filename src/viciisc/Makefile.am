@@ -20,6 +20,8 @@ noinst_LIBRARIES = libviciisc.a
 
 libviciisc_a_SOURCES = \
 	vicii-chip-model.c \
+	vicii-coproc.c \
+	vicii-coproc.h \
 	vicii-chip-model.h \
 	vicii-cmdline-options.c \
 	vicii-cmdline-options.h \

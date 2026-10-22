@@ -111,6 +111,7 @@ am__v_AR_1 =
 libviciisc_a_AR = $(AR) $(ARFLAGS)
 libviciisc_a_LIBADD =
 am_libviciisc_a_OBJECTS = vicii-chip-model.$(OBJEXT) \
+ vicii-coproc.$(OBJEXT) \
 	vicii-cmdline-options.$(OBJEXT) vicii-color.$(OBJEXT) \
 	vicii-cycle.$(OBJEXT) vicii-draw.$(OBJEXT) \
 	vicii-draw-cycle.$(OBJEXT) vicii-fetch.$(OBJEXT) \
@@ -438,6 +439,8 @@ noinst_LIBRARIES = libviciisc.a
 libviciisc_a_SOURCES = \
 	vicii-chip-model.c \
 	vicii-chip-model.h \
+	vicii-coproc.c \
+	vicii-coproc.h \
 	vicii-cmdline-options.c \
 	vicii-cmdline-options.h \
 	vicii-color.c \

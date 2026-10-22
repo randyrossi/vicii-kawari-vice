@@ -39,6 +39,7 @@
 #include "maincpu.h"
 #include "types.h"
 #include "vicii-chip-model.h"
+#include "vicii-coproc.h"
 #include "vicii-cycle.h"
 #include "vicii-draw-cycle.h"
 #include "vicii-fetch.h"
@@ -484,6 +485,11 @@ int vicii_cycle(void)
     if (vicii.idle_state) {
         do_dma_xfer();
     }
+
+    /* Run the 6502 co-processor for this VIC cycle. It is stalled
+       automatically while any of the above is running, mirroring the
+       hardware arbiter on video RAM port A. */
+    vicii_coproc_step();
 
     /* Check horizontal border flag */
     check_hborder(vicii.cycle_flags);

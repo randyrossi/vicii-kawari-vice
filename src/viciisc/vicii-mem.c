@@ -41,6 +41,7 @@
 #include "vicii-fetch.h"
 #include "vicii-irq.h"
 #include "vicii-resources.h"
+#include "vicii-coproc.h"
 #include "vicii-mem.h"
 #include "vicii.h"
 #include "viciitypes.h"
@@ -107,6 +108,49 @@ static uint16_t blit_pixels_written;
 static uint16_t blit_tmp_addr;
 
 static uint8_t dma_op = 0;
+
+/* Nonzero while any legacy video RAM port A engine is running. Mirrors
+   legacy_busy in hdl/videoram_cpu.v: the four done flags there are the
+   equivalents of dma_op and blit_done here. */
+int vicii_legacy_busy(void)
+{
+    return (dma_op != 0) || !blit_done;
+}
+
+/* Defined further down; needed by the overlay routing below. */
+static void handle_eeprom_save(int reg, int value);
+void handle_color_change(uint8_t reg, uint8_t value);
+
+/* The co-processor control registers live in the overlay address range but
+   are real registers, not overlay RAM, so they are routed here instead of
+   into overlayMem. Matches the EXT_REG_CPU_* cases in registers_ram.vi. */
+#define VICII_COPROC_REG_LO 0x20
+#define VICII_COPROC_REG_HI 0x2b
+
+static int coproc_is_reg(int idx)
+{
+    return idx >= VICII_COPROC_REG_LO && idx <= VICII_COPROC_REG_HI;
+}
+
+static void overlay_write(int idx, uint8_t value)
+{
+    if (coproc_is_reg(idx)) {
+        vicii_coproc_write_reg(idx, value);
+        return;
+    }
+    overlayMem[idx] = value;
+    handle_color_change(idx, value);
+    handle_eeprom_save(idx, value);
+}
+
+static uint8_t overlay_read(int idx)
+{
+    if (coproc_is_reg(idx)) {
+        return vicii_coproc_read_reg(idx);
+    }
+    return overlayMem[idx];
+}
+
 static int copy_idx;
 static uint16_t copy_num;
 static uint16_t copy_dest;
@@ -805,9 +849,7 @@ void vicii_store(uint16_t addr, uint8_t value)
                  handle_dma(fl, value);
               } else {
                  if (extraRegs[0x3F] & 32) {
-                    overlayMem[extraRegs[0x39]] = value;
-                    handle_color_change(extraRegs[0x39], value);
-                    handle_eeprom_save(extraRegs[0x39], value);
+                    overlay_write(extraRegs[0x39], value);
                     autoincdec(fl, 0x39);
                  } else {
                     tmpaddr = extraRegs[0x39]+extraRegs[0x3a]*256+                                                   extraRegs[0x35];
@@ -830,9 +872,7 @@ void vicii_store(uint16_t addr, uint8_t value)
         case 0x3e:                /* $D03E: Unused */
             if (extra_regs_activated) {
               if (extraRegs[0x3F] & 32) {
-                 overlayMem[extraRegs[0x3c]] = value;
-                 handle_color_change(extraRegs[0x3c], value);
-                 handle_eeprom_save(extraRegs[0x3c], value);
+                 overlay_write(extraRegs[0x3c], value);
               } else {
                  tmpaddr = extraRegs[0x3c]+
                     extraRegs[0x3d]*256+extraRegs[0x36];
@@ -1207,7 +1247,7 @@ uint8_t vicii_read(uint16_t addr)
         case 0x3b: // ptr 1 value
             if (extra_regs_activated) {
                if (extraRegs[0x3F] & 32) {
-                  value = overlayMem[extraRegs[0x39]];
+                  value = overlay_read(extraRegs[0x39]);
                } else {
                   value = read_vram(extraRegs[0x39]+
                     extraRegs[0x3a]*256+extraRegs[0x35]);
@@ -1233,7 +1273,7 @@ uint8_t vicii_read(uint16_t addr)
         case 0x3e: // ptr 2 value
             if (extra_regs_activated) {
                if (extraRegs[0x3F] & 32) {
-                  value = overlayMem[extraRegs[0x3c]];
+                  value = overlay_read(extraRegs[0x3c]);
                } else {
                   tmpaddr = extraRegs[0x3c]+
                     extraRegs[0x3d]*256+extraRegs[0x36];
@@ -1317,7 +1357,7 @@ void do_copy(void) {
    switch (dma_op) {
      case 1: // low to high
        if (extraRegs[0x3F] & 32) { // added in 1.16
-          overlayMem[(copy_dest + copy_idx) & 0xff] = read_vram(copy_src + copy_idx);
+          overlay_write((copy_dest + copy_idx) & 0xff, read_vram(copy_src + copy_idx));
           handle_color_change((copy_dest + copy_idx) & 0xff, read_vram(copy_src + copy_idx));
        } else {
           write_vram(copy_dest + copy_idx, read_vram(copy_src + copy_idx));
@@ -1333,7 +1373,7 @@ void do_copy(void) {
        break;
      case 2: // high to low
        if (extraRegs[0x3F] & 32) { // added in 1.16
-          overlayMem[(copy_dest + copy_idx) & 0xff] = read_vram(copy_src + copy_idx);
+          overlay_write((copy_dest + copy_idx) & 0xff, read_vram(copy_src + copy_idx));
           handle_color_change((copy_dest + copy_idx) & 0xff,
               read_vram(copy_src + copy_idx));
        } else {

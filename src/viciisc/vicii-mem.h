@@ -34,6 +34,9 @@ extern unsigned char extraRegs[64];
 extern unsigned char extraMem[65536];
 extern unsigned char overlayMem[256];
 
+/* Nonzero while a DMA, fill, copy or blitter owns video RAM port A. */
+extern int vicii_legacy_busy(void);
+
 extern void vicii_store(uint16_t addr, uint8_t value);
 extern void vicii_poke(uint16_t addr, uint8_t value);
 extern uint8_t vicii_read(uint16_t addr);
